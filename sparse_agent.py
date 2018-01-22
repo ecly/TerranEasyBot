@@ -14,27 +14,12 @@ from pysc2.lib import features
 _UNITS = ub.Unit.units()
 _BUILDINGS = ub.Building.buildings()
 
-_NO_OP = actions.FUNCTIONS.no_op.id
-_SELECT_POINT = actions.FUNCTIONS.select_point.id
-_SELECT_ARMY = actions.FUNCTIONS.select_army.id
-_ATTACK_MINIMAP = actions.FUNCTIONS.Attack_minimap.id
-_HARVEST_GATHER = actions.FUNCTIONS.Harvest_Gather_screen.id
-
-
-_PLAYER_RELATIVE = features.SCREEN_FEATURES.player_relative.index
-_UNIT_TYPE = features.SCREEN_FEATURES.unit_type.index
-_PLAYER_ID = features.SCREEN_FEATURES.player_id.index
-
-_PLAYER_SELF = 1
-_PLAYER_HOSTILE = 4
-_ARMY_SUPPLY = 5
 
 _NOT_QUEUED = [0]
 _QUEUED = [1]
 _SELECT_ALL = [2]
 
 DATA_FILE = 'sparse_agent_data'
-
 ACTION_DO_NOTHING = 'donothing'
 ACTION_ATTACK = 'attack'
 
