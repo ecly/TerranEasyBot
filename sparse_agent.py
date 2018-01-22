@@ -1,19 +1,18 @@
 import random
-import math
 import os
+import buildings
+import units
 
 import numpy as np
 import pandas as pd
-import units_and_buildings as ub
+import identifiers as ids
 
 from random import randint
 from pysc2.agents import base_agent
 from pysc2.lib import actions
-from pysc2.lib import features
 
-_UNITS = ub.Unit.units()
-_BUILDINGS = ub.Building.buildings()
-
+UNITS = {u.name: u for u in units.units()}
+BUILDINGS = {b.name: b for b in buildings.buildings()}
 
 _NOT_QUEUED = [0]
 _QUEUED = [1]
@@ -23,14 +22,12 @@ DATA_FILE = 'sparse_agent_data'
 ACTION_DO_NOTHING = 'donothing'
 ACTION_ATTACK = 'attack'
 
-UNIT_ACTION_MAP = {u.smart_action: u for u in _UNITS}
-BUILDING_ACTION_MAP = {b.smart_action: b for b in _BUILDINGS}
-smart_actions = [ACTION_DO_NOTHING] + list(UNIT_ACTION_MAP) + list(BUILDING_ACTION_MAP)
+smart_actions = [ACTION_DO_NOTHING] + list(UNITS) + list(BUILDINGS)
 
 #for mm_x in range(0, 64):
-    #for mm_y in range(0, 64):
-        #if (mm_x + 1) % 32 == 0 and (mm_y + 1) % 32 == 0:
-            #smart_actions.append(ACTION_ATTACK + '_' + str(mm_x - 16) + '_' + str(mm_y - 16))
+#    for mm_y in range(0, 64):
+#        if (mm_x + 1) % 32 == 0 and (mm_y + 1) % 32 == 0:
+#            smart_actions.append(ACTION_ATTACK + '_' + str(mm_x - 16) + '_' + str(mm_y - 16))
 
 # Stolen from https://github.com/MorvanZhou/Reinforcement-learning-with-tensorflow
 class QLearningTable:
@@ -64,11 +61,7 @@ class QLearningTable:
         self.check_state_exist(s)
 
         q_predict = self.q_table.ix[s, a]
-
-        if s_ != 'terminal':
-            q_target = r + self.gamma * self.q_table.ix[s_, :].max()
-        else:
-            q_target = r  # next state is terminal
+        q_target = r + self.gamma * self.q_table.ix[s_, :].max() if s_ != 'terminal' else r  # next state is terminal
 
         # update
         self.q_table.ix[s, a] += self.lr * (q_target - q_predict)
@@ -98,48 +91,44 @@ class SparseAgent(base_agent.BaseAgent):
                 DATA_FILE + '.gz', compression='gzip')
 
     def select_workers(self, obs):
-        unit_type = obs.observation['screen'][_UNIT_TYPE]
-        unit_y, unit_x = (unit_type == ub.TERRAN_SCV).nonzero()
+        unit_type = obs.observation['screen'][ids.UNIT_TYPE]
+        unit_y, unit_x = (unit_type == ids.TERRAN_SCV).nonzero()
         if unit_y.any():
             i = random.randint(0, len(unit_y) - 1)
             target = [unit_x[i], unit_y[i]]
-            return actions.FunctionCall(_SELECT_POINT, [_NOT_QUEUED, target])
+            return actions.FunctionCall(ids.SELECT_POINT, [_NOT_QUEUED, target])
 
     def unit_attack(self, x, y, obs):
         if self.move_number == 0:
-            if _SELECT_ARMY in obs.observation['available_actions']:
-                return actions.FunctionCall(_SELECT_ARMY, [_NOT_QUEUED])
+            if ids.SELECT_ARMY in obs.observation['available_actions']:
+                return actions.FunctionCall(ids.SELECT_ARMY, [_NOT_QUEUED])
         elif self.move_number == 1:
             do_it = True
 
-            if len(obs.observation['single_select']) > 0 and obs.observation['single_select'][0][0] == ub.TERRAN_SCV:
+            if ((len(obs.observation['single_select']) > 0 and obs.observation['single_select'][0][0] == ids.TERRAN_SCV)
+               or (len(obs.observation['multi_select']) > 0 and obs.observation['multi_select'][0][0] == ids.TERRAN_SCV)):
                 do_it = False
 
-            if len(obs.observation['multi_select']) > 0 and obs.observation['multi_select'][0][0] == ub.TERRAN_SCV:
-                do_it = False
-
-            if do_it and _ATTACK_MINIMAP in obs.observation["available_actions"]:
+            if do_it and ids.ATTACK_MINIMAP in obs.observation["available_actions"]:
                 x_offset = random.randint(-1, 1)
                 y_offset = random.randint(-1, 1)
-                return actions.FunctionCall(_ATTACK_MINIMAP, [_NOT_QUEUED, self.transformLocation(int(x) + (x_offset * 8), int(y) + (y_offset * 8))])
+                return actions.FunctionCall(ids.ATTACK_MINIMAP, [_NOT_QUEUED, self.transformLocation(int(x) + (x_offset * 8), int(y) + (y_offset * 8))])
 
     def train_unit(self, unit, obs):
         if self.move_number == 0:
-            target = ub.Building.get_location_from_id(unit.builds_from, obs)
+            target = buildings.get_location_from_id(unit.builds_from, obs)
             if target is not None:
-                print("trying to build from a building")
-                return actions.FunctionCall(_SELECT_POINT, [_SELECT_ALL, target])
+                return actions.FunctionCall(ids.SELECT_POINT, [_SELECT_ALL, target])
         if self.move_number == 1:
             if unit.train in obs.observation['available_actions']:
-                print("training unit")
                 return actions.FunctionCall(unit.train, [_QUEUED])
 
     # assumes a worker is selected
     def return_worker_to_harvest(self, obs):
         r = randint(0, 99)
-        target = ub.Building.get_location_from_id(ub.NEUTRAL_VESPENE_GAS, obs) if r < 20 else \
-            ub.Building.get_location_from_id(ub.NEUTRAL_MINERAL_FIELD, obs)
-        return actions.FunctionCall(_HARVEST_GATHER, [_QUEUED, target])
+        target = buildings.get_location_from_id(ids.NEUTRAL_VESPENE_GAS, obs) if r < 20 else \
+            buildings.get_location_from_id(ids.NEUTRAL_MINERAL_FIELD, obs)
+        return actions.FunctionCall(ids.HARVEST_GATHER, [_QUEUED, target])
 
     def build(self, building, obs):
         if self.move_number == 0:
@@ -148,12 +137,12 @@ class SparseAgent(base_agent.BaseAgent):
             if building.amount_of_building(obs) < building.max_amount and building.build in obs.observation['available_actions']:
                 return actions.FunctionCall(building.build, [_NOT_QUEUED, building.get_location(self, obs)])
         elif self.move_number == 2:
-            if _HARVEST_GATHER in obs.observation['available_actions'] and building.build is not ub.BUILD_REFINERY:
+            if ids.HARVEST_GATHER in obs.observation['available_actions'] and building.build is not ids.BUILD_REFINERY:
                 return self.return_worker_to_harvest(obs)
 
     @staticmethod
     def get_location(_id, obs):
-        unit_type = obs.observation['screen'][_UNIT_TYPE]
+        unit_type = obs.observation['screen'][ids.UNIT_TYPE]
         unit_y, unit_x = (unit_type == _id).nonzero()
         if unit_y.any():
             i = random.randint(0, len(unit_y) - 1)
@@ -182,8 +171,7 @@ class SparseAgent(base_agent.BaseAgent):
 
     def award_step_reward(self, current_state, obs):
         reward = 0
-        starport = BUILDING_ACTION_MAP[ub.ACTION_BUILD_STARPORT]
-        num_starports = starport.amount_of_building(obs)
+        num_starports = BUILDINGS["Starport"].amount_of_building(obs)
         """
         num_starports =  self.amount_of_building(_TERRAN_STARPORT, obs)
         if num_starports > self.previous_num_starports:
@@ -199,7 +187,6 @@ class SparseAgent(base_agent.BaseAgent):
         self.previous_num_starports = num_starports
         """
         self.qlearn.learn(str(self.previous_state),self.previous_action, reward, str(current_state))
-        
 
     def award_end_game_reward(self, obs):
         #reward = obs.reward
@@ -215,16 +202,15 @@ class SparseAgent(base_agent.BaseAgent):
         self.qlearn.learn(str(self.previous_state), self.previous_action, reward, 'terminal')
 
     def update_state(self, obs):
-        unit_type = obs.observation['screen'][_UNIT_TYPE]
-        cc_y, cc_x = (unit_type == ub.TERRAN_COMMAND_CENTER).nonzero()
+        unit_type = obs.observation['screen'][ids.UNIT_TYPE]
+        cc_y, cc_x = (unit_type == ids.TERRAN_COMMAND_CENTER).nonzero()
         cc_count = 1 if cc_y.any() else 0
 
-
-        supply_depot_count = BUILDING_ACTION_MAP[ub.ACTION_BUILD_SUPPLY_DEPOT].amount_of_building(obs)
-        refinerry_count = BUILDING_ACTION_MAP[ub.ACTION_BUILD_REFINERY].amount_of_building(obs)
-        barracks_count = BUILDING_ACTION_MAP[ub.ACTION_BUILD_BARRACKS].amount_of_building(obs)
-        factory_count = BUILDING_ACTION_MAP[ub.ACTION_BUILD_FACTORY].amount_of_building(obs)
-        starport_count = BUILDING_ACTION_MAP[ub.ACTION_BUILD_STARPORT].amount_of_building(obs)
+        supply_depot_count = BUILDINGS["Supply Depot"].amount_of_building(obs)
+        refinery_count = BUILDINGS["Refinery"].amount_of_building(obs)
+        barracks_count = BUILDINGS["Barracks"].amount_of_building(obs)
+        factory_count = BUILDINGS["Factory"].amount_of_building(obs)
+        starport_count = BUILDINGS["Starport"].amount_of_building(obs)
         current_state = np.zeros(6)
         
         current_state[0] = cc_count
@@ -232,7 +218,7 @@ class SparseAgent(base_agent.BaseAgent):
         current_state[2] = barracks_count
         current_state[3] = factory_count
         current_state[4] = starport_count
-        current_state[5] = refinerry_count
+        current_state[5] = refinery_count
         print(current_state)
         #current_state[5] = obs.observation['player'][_ARMY_SUPPLY]
 
@@ -257,32 +243,29 @@ class SparseAgent(base_agent.BaseAgent):
     def step(self, obs):
         super(SparseAgent, self).step(obs)
 
-
         if obs.last():
-
             self.award_end_game_reward(obs)
-            print("save the damn data")
             self.qlearn.q_table.to_pickle(DATA_FILE + '.gz', 'gzip')
             self.previous_action = None
             self.previous_state = None
             self.move_number = 0
 
-            return actions.FunctionCall(_NO_OP, [])
+            return actions.FunctionCall(ids.NO_OP, [])
 
-        unit_type = obs.observation['screen'][_UNIT_TYPE]
+        unit_type = obs.observation['screen'][ids.UNIT_TYPE]
 
         if obs.first():
             player_y, player_x = (
-                obs.observation['minimap'][_PLAYER_RELATIVE] == _PLAYER_SELF).nonzero()
+                obs.observation['minimap'][ids.PLAYER_RELATIVE] == ids.PLAYER_SELF).nonzero()
             self.base_top_left = 1 if player_y.any() and player_y.mean() <= 31 else 0
             self.cc_y, self.cc_x = (
-                unit_type == ub.TERRAN_COMMAND_CENTER).nonzero()
+                unit_type == ids.TERRAN_COMMAND_CENTER).nonzero()
 
         if self.move_number == 0:
             current_state = self.update_state(obs)
 
             if self.previous_action is not None:
-               self.award_step_reward(current_state, obs)
+                self.award_step_reward(current_state, obs)
 
             rl_action = self.qlearn.choose_action(str(current_state))
 
@@ -291,17 +274,17 @@ class SparseAgent(base_agent.BaseAgent):
 
         smart_action, x, y = self.splitAction(self.previous_action)
 
-        if smart_action in UNIT_ACTION_MAP:
-            move = self.train_unit(UNIT_ACTION_MAP[smart_action], obs)
-        elif smart_action in BUILDING_ACTION_MAP:
-            move = self.build(BUILDING_ACTION_MAP[smart_action], obs)
+        if smart_action in UNITS:
+            move = self.train_unit(UNITS[smart_action], obs)
+        elif smart_action in BUILDINGS:
+            move = self.build(BUILDINGS[smart_action], obs)
         elif smart_action == ACTION_ATTACK:
             move = self.unit_attack(x, y, obs)
         else:
-            move = actions.FunctionCall(_NO_OP, [])
+            move = actions.FunctionCall(ids.NO_OP, [])
 
         if move is None:
-            move = actions.FunctionCall(_NO_OP, [])
+            move = actions.FunctionCall(ids.NO_OP, [])
 
         self.move_number = 0 if self.move_number == 3 else self.move_number + 1
         return move
